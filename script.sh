@@ -14,22 +14,22 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # Símbolos
-CHECK="✓"
-CROSS="✗"
-ARROW="→"
-BULLET="•"
-SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+CHECK="[OK]"
+CROSS="[FAIL]"
+ARROW=">>"
+BULLET="--"
+SPINNER=('|' '/' '-' '\')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Funções de UI
 # ══════════════════════════════════════════════════════════════════════════════
 print_banner() {
   clear
-  echo -e "${CYAN}${BOLD}"
-  echo "  ╔═══════════════════════════════════════════════════════════════╗"
-  echo "  ║                     SMTP SECURITY AUDIT                       ║"
-  echo "  ║                        Pentest Tool                           ║"
-  echo "  ╚═══════════════════════════════════════════════════════════════╝"
+  echo -e "${CYAN}"
+  echo "  ┌─────────────────────────────────────────────────────────────────┐"
+  echo "  │                     SMTP SECURITY AUDIT                         │"
+  echo "  │                        Pentest Tool v1.0                        │"
+  echo "  └─────────────────────────────────────────────────────────────────┘"
   echo -e "${NC}"
 }
 
@@ -200,183 +200,136 @@ cat > "$OUTDIR/report.html" << 'HTMLHEAD'
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SMTP Security Audit Report</title>
   <style>
-    :root {
-      --bg-dark: #0d1117;
-      --bg-card: #161b22;
-      --bg-card-hover: #1c2129;
-      --border: #30363d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --green: #3fb950;
-      --red: #f85149;
-      --yellow: #d29922;
-      --blue: #58a6ff;
-      --cyan: #39c5cf;
-    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: var(--bg-dark);
-      color: var(--text);
-      line-height: 1.6;
-      padding: 2rem;
+      font-family: 'Courier New', Courier, monospace;
+      background: #0a0a0a;
+      color: #00ff00;
+      line-height: 1.5;
+      padding: 20px;
+      font-size: 14px;
     }
-    .container { max-width: 1200px; margin: 0 auto; }
+    .container { max-width: 1000px; margin: 0 auto; }
     header {
-      text-align: center;
-      padding: 2rem;
-      background: linear-gradient(135deg, #1a1f29 0%, #0d1117 100%);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      margin-bottom: 2rem;
+      border: 1px solid #00ff00;
+      padding: 15px;
+      margin-bottom: 20px;
     }
     header h1 {
-      font-size: 2.5rem;
-      background: linear-gradient(90deg, var(--cyan), var(--blue));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+      font-weight: normal;
+      margin-bottom: 5px;
     }
-    header .meta { color: var(--text-muted); font-size: 0.9rem; }
+    header .meta { color: #888; font-size: 0.85rem; }
     .summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px dashed #444;
     }
-    .summary-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.5rem;
-      text-align: center;
-    }
-    .summary-card .number { font-size: 2.5rem; font-weight: bold; }
-    .summary-card .label { color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; }
-    .summary-card.ok .number { color: var(--green); }
-    .summary-card.fail .number { color: var(--red); }
-    .summary-card.warn .number { color: var(--yellow); }
-    .summary-card.info .number { color: var(--blue); }
-    .server-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      margin-bottom: 1.5rem;
-      overflow: hidden;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .server-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    .summary-item { min-width: 150px; }
+    .summary-item .label { color: #888; }
+    .summary-item .value { font-weight: bold; }
+    .summary-item .value.ok { color: #00ff00; }
+    .summary-item .value.fail { color: #ff0000; }
+    .summary-item .value.warn { color: #ffff00; }
+    .server-block {
+      border: 1px solid #333;
+      margin-bottom: 15px;
     }
     .server-header {
-      background: var(--bg-card-hover);
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid var(--border);
+      background: #111;
+      padding: 10px 15px;
+      border-bottom: 1px solid #333;
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
     }
-    .server-header h2 { font-size: 1.1rem; color: var(--cyan); }
-    .server-header .ip { color: var(--text-muted); font-family: monospace; }
-    .server-body { padding: 1.5rem; }
-    .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
-    .test-item {
-      background: var(--bg-dark);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
+    .server-header .name { color: #00ffff; }
+    .server-header .ip { color: #888; }
+    .server-header .badge {
+      padding: 2px 8px;
+      font-size: 0.8rem;
     }
-    .test-item h3 {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      margin-bottom: 0.5rem;
-    }
-    .test-item .status {
+    .server-header .badge.critical { color: #ff0000; border: 1px solid #ff0000; }
+    .server-header .badge.safe { color: #00ff00; border: 1px solid #00ff00; }
+    .server-body { padding: 15px; }
+    .test-row {
       display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 1.1rem;
-      font-weight: 600;
+      padding: 8px 0;
+      border-bottom: 1px dotted #222;
     }
-    .test-item .status.ok { color: var(--green); }
-    .test-item .status.fail { color: var(--red); }
-    .test-item .status.warn { color: var(--yellow); }
-    .test-item .status.unreachable { color: var(--text-muted); }
-    .test-item .details {
-      margin-top: 0.75rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid var(--border);
+    .test-row:last-child { border-bottom: none; }
+    .test-label { width: 200px; color: #888; }
+    .test-value { flex: 1; }
+    .test-value.ok { color: #00ff00; }
+    .test-value.fail { color: #ff0000; }
+    .test-value.warn { color: #ffff00; }
+    .test-value.unreachable { color: #666; }
+    .details {
+      margin-top: 5px;
+      padding-left: 200px;
+      color: #666;
       font-size: 0.85rem;
-      color: var(--text-muted);
     }
-    .test-item .details code {
-      display: block;
-      background: #0d1117;
-      padding: 0.5rem;
-      border-radius: 4px;
-      margin-top: 0.5rem;
-      font-family: 'Fira Code', monospace;
-      font-size: 0.8rem;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
+    .vuln-box {
+      background: #1a0000;
+      border: 1px solid #ff0000;
+      padding: 15px;
+      margin-top: 15px;
     }
-    .vuln-detail {
-      background: rgba(248, 81, 73, 0.1);
-      border: 1px solid var(--red);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-top: 1rem;
+    .vuln-box h4 { color: #ff0000; margin-bottom: 10px; font-weight: normal; }
+    .vuln-box ul { margin-left: 20px; color: #ff6666; }
+    .vuln-box li { margin-bottom: 5px; }
+    .recommendations {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px dashed #333;
     }
-    .vuln-detail h4 { color: var(--red); margin-bottom: 0.5rem; }
-    .vuln-detail ul { margin-left: 1.5rem; }
-    .vuln-detail li { margin-bottom: 0.25rem; }
-    .collapsible { cursor: pointer; user-select: none; }
-    .collapsible::before { content: '▶ '; font-size: 0.7rem; }
-    .collapsible.active::before { content: '▼ '; }
-    .collapsible-content { display: none; margin-top: 0.5rem; }
-    .collapsible-content.show { display: block; }
-    .nmap-output {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-top: 1rem;
-      font-family: 'Fira Code', monospace;
-      font-size: 0.8rem;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .badge {
+    .recommendations h4 { color: #00ffff; margin-bottom: 10px; font-weight: normal; }
+    .recommendations ul { margin-left: 20px; color: #888; }
+    .collapsible {
+      cursor: pointer;
+      color: #00ffff;
+      text-decoration: underline;
+      margin-top: 10px;
       display: inline-block;
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
     }
-    .badge.critical { background: var(--red); color: white; }
-    .badge.warning { background: var(--yellow); color: black; }
-    .badge.safe { background: var(--green); color: white; }
+    .collapsible:hover { color: #00ff00; }
+    .collapsible-content {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: #050505;
+      border: 1px solid #222;
+      max-height: 300px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-size: 0.8rem;
+      color: #888;
+    }
+    .collapsible-content.show { display: block; }
     footer {
       text-align: center;
-      padding: 2rem;
-      color: var(--text-muted);
-      font-size: 0.85rem;
+      padding: 20px;
+      color: #444;
+      font-size: 0.8rem;
+      border-top: 1px solid #222;
+      margin-top: 20px;
     }
+    pre { white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>🔒 SMTP Security Audit</h1>
+      <h1>[ SMTP SECURITY AUDIT ]</h1>
 HTMLHEAD
 
-echo "      <p class=\"meta\">Domínio: <strong>$DOMAIN</strong> | Data: $(date '+%Y-%m-%d %H:%M:%S')</p>" >> "$OUTDIR/report.html"
+echo "      <p class=\"meta\">Target: $DOMAIN | Date: $(date '+%Y-%m-%d %H:%M:%S')</p>" >> "$OUTDIR/report.html"
 echo "    </header>" >> "$OUTDIR/report.html"
 
 print_section "Auditoria SMTP"
@@ -496,32 +449,32 @@ for M in $MX; do
 
   # Exibe resultados
   echo ""
-  echo -e "    ${BOLD}Resultados:${NC}"
+  echo -e "    ${BOLD}Results:${NC}"
   
   if [ "$R25" = "ok" ]; then
-    print_status ok "Relay porta 25: ${GREEN}Protegido${NC}"
+    print_status ok "Relay port 25: ${GREEN}Protected${NC}"
   elif [ "$R25" = "fail" ]; then
-    print_status fail "Relay porta 25: ${RED}VULNERÁVEL (Open Relay)${NC}"
+    print_status fail "Relay port 25: ${RED}VULNERABLE (Open Relay)${NC}"
   else
-    print_status unreachable "Relay porta 25"
+    print_status unreachable "Relay port 25"
   fi
 
   if [ "$R587" = "ok" ]; then
-    print_status ok "Relay porta 587: ${GREEN}Protegido${NC}"
+    print_status ok "Relay port 587: ${GREEN}Protected${NC}"
   elif [ "$R587" = "fail" ]; then
-    print_status fail "Relay porta 587: ${RED}VULNERÁVEL (Open Relay)${NC}"
+    print_status fail "Relay port 587: ${RED}VULNERABLE (Open Relay)${NC}"
   else
-    print_status unreachable "Relay porta 587"
+    print_status unreachable "Relay port 587"
   fi
 
   if [ "$STARTTLS" = "ok" ]; then
-    print_status ok "STARTTLS: ${GREEN}Habilitado${NC}"
+    print_status ok "STARTTLS: ${GREEN}Enabled${NC}"
   else
-    print_status warn "STARTTLS: ${YELLOW}Não detectado${NC}"
+    print_status warn "STARTTLS: ${YELLOW}Not detected${NC}"
   fi
 
   if [ "$NMAP_RELAY" = "fail" ]; then
-    print_status fail "Nmap Open Relay: ${RED}DETECTADO${NC}"
+    print_status fail "Nmap Open Relay: ${RED}DETECTED${NC}"
   fi
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -582,71 +535,64 @@ for M in $MX; do
   # Gera HTML para este servidor
   # ════════════════════════════════════════════════════════════════════════════
   SERVER_STATUS_CLASS="safe"
-  SERVER_STATUS_TEXT="Seguro"
-  [ $SERVER_VULNS -gt 0 ] && SERVER_STATUS_CLASS="critical" && SERVER_STATUS_TEXT="$SERVER_VULNS Vulnerabilidade(s)"
+  SERVER_STATUS_TEXT="OK"
+  [ $SERVER_VULNS -gt 0 ] && SERVER_STATUS_CLASS="critical" && SERVER_STATUS_TEXT="$SERVER_VULNS VULN"
 
   cat >> "$OUTDIR/report.html" << SERVERHTML
-    <div class="server-card">
+    <div class="server-block">
       <div class="server-header">
-        <h2>📧 $M</h2>
+        <span class="name">$M</span>
         <span class="ip">$IP</span>
-        <span class="badge $SERVER_STATUS_CLASS">$SERVER_STATUS_TEXT</span>
+        <span class="badge $SERVER_STATUS_CLASS">[$SERVER_STATUS_TEXT]</span>
       </div>
       <div class="server-body">
-        <div class="test-grid">
-          <div class="test-item">
-            <h3>Relay Porta 25</h3>
-            <div class="status $R25">$([ "$R25" = "ok" ] && echo "✓ Protegido" || ([ "$R25" = "fail" ] && echo "✗ VULNERÁVEL" || echo "• Inacessível"))</div>
-            <div class="details">
-              $R25_DETAIL
-              <span class="collapsible" onclick="this.classList.toggle('active'); this.nextElementSibling.classList.toggle('show')">Ver resposta SMTP</span>
-              <code class="collapsible-content">$(cat "$OUTDIR/relay25-$IP.txt" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g' | head -20)</code>
-            </div>
-          </div>
-          <div class="test-item">
-            <h3>Relay Porta 587</h3>
-            <div class="status $R587">$([ "$R587" = "ok" ] && echo "✓ Protegido" || ([ "$R587" = "fail" ] && echo "✗ VULNERÁVEL" || echo "• Inacessível"))</div>
-            <div class="details">
-              $R587_DETAIL
-              <span class="collapsible" onclick="this.classList.toggle('active'); this.nextElementSibling.classList.toggle('show')">Ver resposta SMTP</span>
-              <code class="collapsible-content">$(cat "$OUTDIR/relay587-$IP.txt" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g' | head -20)</code>
-            </div>
-          </div>
-          <div class="test-item">
-            <h3>STARTTLS</h3>
-            <div class="status $([ "$STARTTLS" = "ok" ] && echo "ok" || echo "warn")">$([ "$STARTTLS" = "ok" ] && echo "✓ Habilitado" || echo "• Não detectado")</div>
-            <div class="details">$([ "$STARTTLS" = "ok" ] && echo "Servidor suporta criptografia TLS" || echo "Servidor pode estar transmitindo em texto plano")</div>
-          </div>
-          <div class="test-item">
-            <h3>Nmap Open Relay</h3>
-            <div class="status $NMAP_RELAY">$([ "$NMAP_RELAY" = "ok" ] && echo "✓ Não detectado" || echo "✗ DETECTADO")</div>
-            <div class="details">Verificação via script nmap smtp-open-relay</div>
-          </div>
+        <div class="test-row">
+          <span class="test-label">Relay Port 25:</span>
+          <span class="test-value $R25">$([ "$R25" = "ok" ] && echo "[OK] Protected" || ([ "$R25" = "fail" ] && echo "[FAIL] VULNERABLE" || echo "[--] Unreachable"))</span>
+        </div>
+        <div class="details">$R25_DETAIL</div>
+        
+        <div class="test-row">
+          <span class="test-label">Relay Port 587:</span>
+          <span class="test-value $R587">$([ "$R587" = "ok" ] && echo "[OK] Protected" || ([ "$R587" = "fail" ] && echo "[FAIL] VULNERABLE" || echo "[--] Unreachable"))</span>
+        </div>
+        <div class="details">$R587_DETAIL</div>
+        
+        <div class="test-row">
+          <span class="test-label">STARTTLS:</span>
+          <span class="test-value $([ "$STARTTLS" = "ok" ] && echo "ok" || echo "warn")">$([ "$STARTTLS" = "ok" ] && echo "[OK] Enabled" || echo "[WARN] Not detected")</span>
+        </div>
+        
+        <div class="test-row">
+          <span class="test-label">Nmap Open Relay:</span>
+          <span class="test-value $NMAP_RELAY">$([ "$NMAP_RELAY" = "ok" ] && echo "[OK] Not detected" || echo "[FAIL] DETECTED")</span>
         </div>
 SERVERHTML
 
   # Adiciona seção de vulnerabilidades se houver
   if [ $SERVER_VULNS -gt 0 ]; then
     cat >> "$OUTDIR/report.html" << VULNHTML
-        <div class="vuln-detail">
-          <h4>⚠️ Detalhes das Vulnerabilidades</h4>
+        <div class="vuln-box">
+          <h4>:: VULNERABILITIES DETECTED ::</h4>
           <ul>
 VULNHTML
-    [ "$R25" = "fail" ] && echo "            <li><strong>Open Relay Porta 25:</strong> $R25_DETAIL</li>" >> "$OUTDIR/report.html"
-    [ "$R587" = "fail" ] && echo "            <li><strong>Open Relay Porta 587:</strong> $R587_DETAIL</li>" >> "$OUTDIR/report.html"
-    [ "$NMAP_RELAY" = "fail" ] && echo "            <li><strong>Nmap Open Relay:</strong> Script nmap confirmou servidor como open relay</li>" >> "$OUTDIR/report.html"
+    [ "$R25" = "fail" ] && echo "            <li>Open Relay Port 25: $R25_DETAIL</li>" >> "$OUTDIR/report.html"
+    [ "$R587" = "fail" ] && echo "            <li>Open Relay Port 587: $R587_DETAIL</li>" >> "$OUTDIR/report.html"
+    [ "$NMAP_RELAY" = "fail" ] && echo "            <li>Nmap Open Relay: Script confirmed open relay</li>" >> "$OUTDIR/report.html"
     if [ -n "$NMAP_VULNS" ]; then
-      echo "            <li><strong>Vulnerabilidades CVE detectadas:</strong><pre>$(echo "$NMAP_VULNS" | sed 's/</\&lt;/g; s/>/\&gt;/g')</pre></li>" >> "$OUTDIR/report.html"
+      echo "            <li>CVE Vulnerabilities:<pre>$(echo "$NMAP_VULNS" | sed 's/</\&lt;/g; s/>/\&gt;/g')</pre></li>" >> "$OUTDIR/report.html"
     fi
     cat >> "$OUTDIR/report.html" << VULNHTML2
           </ul>
-          <h4 style="margin-top: 1rem;">🛡️ Recomendações</h4>
-          <ul>
-            <li>Configure autenticação SMTP obrigatória para relay</li>
-            <li>Restrinja relay apenas para IPs/redes autorizadas</li>
-            <li>Implemente SPF, DKIM e DMARC</li>
-            <li>Monitore logs de envio para atividades suspeitas</li>
-          </ul>
+          <div class="recommendations">
+            <h4>:: RECOMMENDATIONS ::</h4>
+            <ul>
+              <li>Configure mandatory SMTP authentication for relay</li>
+              <li>Restrict relay to authorized IPs/networks only</li>
+              <li>Implement SPF, DKIM and DMARC</li>
+              <li>Monitor mail logs for suspicious activity</li>
+            </ul>
+          </div>
         </div>
 VULNHTML2
   fi
@@ -654,10 +600,14 @@ VULNHTML2
   # Adiciona output do nmap
   if [ -f "$OUTDIR/nmap-$IP.txt" ]; then
     cat >> "$OUTDIR/report.html" << NMAPHTML
-        <div style="margin-top: 1rem;">
-          <span class="collapsible" onclick="this.classList.toggle('active'); this.nextElementSibling.classList.toggle('show')">📋 Ver output completo do Nmap</span>
-          <div class="nmap-output collapsible-content">$(cat "$OUTDIR/nmap-$IP.txt" | sed 's/</\&lt;/g; s/>/\&gt;/g')</div>
-        </div>
+        <span class="collapsible" onclick="this.nextElementSibling.classList.toggle('show')">[+] View Nmap output</span>
+        <div class="collapsible-content">$(cat "$OUTDIR/nmap-$IP.txt" | sed 's/</\&lt;/g; s/>/\&gt;/g')</div>
+        
+        <span class="collapsible" onclick="this.nextElementSibling.classList.toggle('show')">[+] View SMTP Port 25 log</span>
+        <div class="collapsible-content">$(cat "$OUTDIR/relay25-$IP.txt" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g')</div>
+        
+        <span class="collapsible" onclick="this.nextElementSibling.classList.toggle('show')">[+] View SMTP Port 587 log</span>
+        <div class="collapsible-content">$(cat "$OUTDIR/relay587-$IP.txt" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g')</div>
 NMAPHTML
   fi
 
@@ -703,21 +653,21 @@ echo "}" >> "$OUTDIR/report.json"
 # Insere summary cards no início (após header)
 SUMMARY_HTML=$(cat << SUMMARYEOF
     <div class="summary">
-      <div class="summary-card info">
-        <div class="number">$MX_COUNT</div>
-        <div class="label">Servidores MX</div>
+      <div class="summary-item">
+        <span class="label">MX Servers:</span>
+        <span class="value">$MX_COUNT</span>
       </div>
-      <div class="summary-card ok">
-        <div class="number">$SERVERS_OK</div>
-        <div class="label">Seguros</div>
+      <div class="summary-item">
+        <span class="label">Secure:</span>
+        <span class="value ok">$SERVERS_OK</span>
       </div>
-      <div class="summary-card fail">
-        <div class="number">$SERVERS_FAIL</div>
-        <div class="label">Vulneráveis</div>
+      <div class="summary-item">
+        <span class="label">Vulnerable:</span>
+        <span class="value $([ $SERVERS_FAIL -gt 0 ] && echo "fail" || echo "ok")">$SERVERS_FAIL</span>
       </div>
-      <div class="summary-card $([ $TOTAL_VULNS -gt 0 ] && echo "fail" || echo "ok")">
-        <div class="number">$TOTAL_VULNS</div>
-        <div class="label">Vulnerabilidades</div>
+      <div class="summary-item">
+        <span class="label">Total Vulns:</span>
+        <span class="value $([ $TOTAL_VULNS -gt 0 ] && echo "fail" || echo "ok")">$TOTAL_VULNS</span>
       </div>
     </div>
 SUMMARYEOF
@@ -733,16 +683,10 @@ SUMMARYEOF
 # Adiciona footer
 cat >> "$OUTDIR/report.html" << HTMLFOOTER
     <footer>
-      <p>Gerado por SMTP Security Audit Tool | $(date '+%Y-%m-%d %H:%M:%S')</p>
-      <p>Arquivos de log disponíveis no diretório: $OUTDIR</p>
+      <p>Generated by SMTP Security Audit Tool | $(date '+%Y-%m-%d %H:%M:%S')</p>
+      <p>Log files: $OUTDIR/</p>
     </footer>
   </div>
-  <script>
-    // Auto-expand vulnerabilities on page load
-    document.querySelectorAll('.vuln-detail').forEach(el => {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
-  </script>
 </body>
 </html>
 HTMLFOOTER
@@ -750,41 +694,41 @@ HTMLFOOTER
 # ══════════════════════════════════════════════════════════════════════════════
 # Resumo Final
 # ══════════════════════════════════════════════════════════════════════════════
-print_section "Resumo"
+print_section "Summary"
 
-echo -e "  ${GRAY}Diretório de saída:${NC} ${BOLD}$OUTDIR${NC}"
+echo -e "  ${GRAY}Output directory:${NC} ${BOLD}$OUTDIR${NC}"
 echo ""
-echo -e "  ${GRAY}Relatórios gerados:${NC}"
-print_status ok "report.html - Relatório visual (abra no navegador)"
-print_status ok "report.md   - Relatório Markdown"
-print_status ok "report.json - Dados estruturados"
+echo -e "  ${GRAY}Reports generated:${NC}"
+print_status ok "report.html - Visual report (open in browser)"
+print_status ok "report.md   - Markdown report"
+print_status ok "report.json - Structured data"
 echo ""
-echo -e "  ${GRAY}Estatísticas:${NC}"
-print_status info "Servidores analisados: $MX_COUNT"
-print_status ok "Servidores seguros: $SERVERS_OK"
-[ $SERVERS_FAIL -gt 0 ] && print_status fail "Servidores vulneráveis: $SERVERS_FAIL"
-[ $TOTAL_VULNS -gt 0 ] && print_status fail "Total de vulnerabilidades: $TOTAL_VULNS"
+echo -e "  ${GRAY}Statistics:${NC}"
+print_status info "Servers analyzed: $MX_COUNT"
+print_status ok "Secure servers: $SERVERS_OK"
+[ $SERVERS_FAIL -gt 0 ] && print_status fail "Vulnerable servers: $SERVERS_FAIL"
+[ $TOTAL_VULNS -gt 0 ] && print_status fail "Total vulnerabilities: $TOTAL_VULNS"
 echo ""
 
 if [ $FAIL -eq 1 ]; then
-  echo -e "  ${RED}${BOLD}╔════════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "  ${RED}${BOLD}║  ⚠  VULNERABILIDADES DETECTADAS                               ║${NC}"
-  echo -e "  ${RED}${BOLD}╚════════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "  ${RED}┌────────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "  ${RED}│  [!] VULNERABILITIES DETECTED                                  │${NC}"
+  echo -e "  ${RED}└────────────────────────────────────────────────────────────────┘${NC}"
   echo ""
-  print_status fail "Verifique os relatórios para detalhes"
+  print_status fail "Check reports for details"
   echo ""
-  echo -e "  ${YELLOW}Abra o relatório HTML:${NC}"
+  echo -e "  ${YELLOW}Open HTML report:${NC}"
   echo -e "  ${CYAN}xdg-open $OUTDIR/report.html${NC}"
   echo ""
   exit 2
 else
-  echo -e "  ${GREEN}${BOLD}╔════════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "  ${GREEN}${BOLD}║  ✓  NENHUMA VULNERABILIDADE CRÍTICA DETECTADA                 ║${NC}"
-  echo -e "  ${GREEN}${BOLD}╚════════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "  ${GREEN}┌────────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "  ${GREEN}│  [OK] NO CRITICAL VULNERABILITIES DETECTED                    │${NC}"
+  echo -e "  ${GREEN}└────────────────────────────────────────────────────────────────┘${NC}"
   echo ""
-  print_status ok "Auditoria concluída com sucesso"
+  print_status ok "Audit completed successfully"
   echo ""
-  echo -e "  ${GRAY}Abra o relatório HTML:${NC}"
+  echo -e "  ${GRAY}Open HTML report:${NC}"
   echo -e "  ${CYAN}xdg-open $OUTDIR/report.html${NC}"
   echo ""
   exit 0
