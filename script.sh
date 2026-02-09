@@ -276,14 +276,24 @@ cat > "$OUTDIR/report.html" << 'HTMLHEAD'
       font-size: 0.85rem;
     }
     .vuln-box {
-      background: #1a0000;
-      border: 1px solid #ff0000;
       padding: 15px;
       margin-top: 15px;
     }
-    .vuln-box h4 { color: #ff0000; margin-bottom: 10px; font-weight: normal; }
+    .vuln-box h4 { margin-bottom: 10px; font-weight: normal; }
+    .vuln-box.critical {
+      background: #1a0000;
+      border: 1px solid #ff0000;
+    }
+    .vuln-box.critical h4 { color: #ff0000; }
+    .vuln-box.warning {
+      background: #1a1a00;
+      border: 1px solid #ffff00;
+    }
+    .vuln-box.warning h4 { color: #ffff00; }
     .vuln-box ul { margin-left: 20px; color: #ff6666; }
+    .vuln-box.warning ul { color: #ffff99; }
     .vuln-box li { margin-bottom: 5px; }
+    .server-header .badge.warning { color: #ffff00; border: 1px solid #ffff00; }
     .recommendations {
       margin-top: 15px;
       padding-top: 15px;
@@ -338,8 +348,10 @@ FAIL=0
 FIRST=1
 CURRENT=0
 TOTAL_VULNS=0
+TOTAL_WARNS=0
 SERVERS_OK=0
 SERVERS_FAIL=0
+SERVERS_WARN=0
 
 # Array para armazenar dados HTML dos servidores
 declare -a HTML_SERVERS
@@ -389,28 +401,104 @@ for M in $MX; do
 
   if grep -q "Connection timed out\|Connection refused" "$OUTDIR/relay25-$IP.txt"; then
     R25="unreachable"
-    R25_DETAIL="Porta 25 não está acessível (timeout ou conexão recusada)"
-  elif grep -q "250 OK" "$OUTDIR/relay25-$IP.txt"; then
-    R25="fail"
-    FAIL=1
-    TOTAL_VULNS=$((TOTAL_VULNS + 1))
-    R25_DETAIL="CRÍTICO: Servidor aceita relay sem autenticação na porta 25. Resposta '250 OK' ao RCPT TO externo. Atacantes podem usar este servidor para enviar spam."
+    R25_DETAIL="Port 25 not reachable (timeout or connection refused)"
+    R25_SEVERITY="info"
   else
-    R25="ok"
-    R25_DETAIL="Servidor rejeitou corretamente tentativa de relay não autenticado"
+    # Analisa resposta específica ao RCPT TO (não apenas qualquer 250 OK)
+    RCPT_RESPONSE=$(grep -A1 "RCPT TO:" "$OUTDIR/relay25-$IP.txt" 2>/dev/null | tail -1)
+    
+    if echo "$RCPT_RESPONSE" | grep -q "^<-.*250"; then
+      # RCPT TO aceito = open relay confirmado
+      R25="fail"
+      FAIL=1
+      TOTAL_VULNS=$((TOTAL_VULNS + 1))
+      R25_DETAIL="CRITICAL: Server accepts relay without authentication on port 25. RCPT TO external accepted with '250'. Attackers can use this server to send spam."
+      R25_SEVERITY="critical"
+    elif echo "$RCPT_RESPONSE" | grep -qi "sender.verify.failed\|sender.rejected"; then
+      # Sender verification em vez de relay policy - configuração perigosa
+      R25="warn"
+      R25_DETAIL="WEAK CONFIG: Server rejects via sender verification, not relay policy. Should return '550 Relay not permitted' or '530 Auth required'. Risk of backscatter and bounce abuse."
+      R25_SEVERITY="high"
+    elif echo "$RCPT_RESPONSE" | grep -qi "relay.not.permitted\|relaying.denied\|relay.access.denied"; then
+      # Relay policy correta
+      R25="ok"
+      R25_DETAIL="Server correctly rejects relay with proper policy"
+      R25_SEVERITY="ok"
+    elif echo "$RCPT_RESPONSE" | grep -qi "authentication.required\|auth.*required\|530"; then
+      # Auth required - correto para 587, aceitável para 25
+      R25="ok"
+      R25_DETAIL="Server requires authentication before relay"
+      R25_SEVERITY="ok"
+    elif echo "$RCPT_RESPONSE" | grep -qi "^<-.*5[0-9][0-9]"; then
+      # Qualquer outro erro 5xx - provavelmente ok mas verificar
+      R25="ok"
+      R25_DETAIL="Server rejected relay attempt ($(echo "$RCPT_RESPONSE" | sed 's/^<- //'))"
+      R25_SEVERITY="ok"
+    elif echo "$RCPT_RESPONSE" | grep -qi "^<-.*4[0-9][0-9]"; then
+      # Erro 4xx - temporário, pode ser greylisting
+      R25="warn"
+      R25_DETAIL="Temporary rejection (greylisting?). Manual verification recommended."
+      R25_SEVERITY="medium"
+    else
+      # Não conseguiu determinar - verificar log manualmente
+      R25="unknown"
+      R25_DETAIL="Could not determine relay status. Check logs manually."
+      R25_SEVERITY="medium"
+    fi
   fi
 
   if grep -q "Connection timed out\|Connection refused" "$OUTDIR/relay587-$IP.txt"; then
     R587="unreachable"
-    R587_DETAIL="Porta 587 não está acessível (timeout ou conexão recusada)"
-  elif grep -q "250 OK" "$OUTDIR/relay587-$IP.txt"; then
-    R587="fail"
-    FAIL=1
-    TOTAL_VULNS=$((TOTAL_VULNS + 1))
-    R587_DETAIL="CRÍTICO: Servidor aceita relay sem autenticação na porta 587. Resposta '250 OK' ao RCPT TO externo."
+    R587_DETAIL="Port 587 not reachable (timeout or connection refused)"
+    R587_SEVERITY="info"
   else
-    R587="ok"
-    R587_DETAIL="Servidor rejeitou corretamente tentativa de relay não autenticado"
+    # Analisa resposta específica ao RCPT TO
+    RCPT_RESPONSE_587=$(grep -A1 "RCPT TO:" "$OUTDIR/relay587-$IP.txt" 2>/dev/null | tail -1)
+    
+    # Verifica se aceitou MAIL FROM sem AUTH (RFC 6409 violation)
+    MAIL_FROM_ACCEPTED=0
+    if grep -q "MAIL FROM:" "$OUTDIR/relay587-$IP.txt" && grep -B1 "RCPT TO:" "$OUTDIR/relay587-$IP.txt" | grep -q "^<-.*250"; then
+      MAIL_FROM_ACCEPTED=1
+    fi
+    
+    if echo "$RCPT_RESPONSE_587" | grep -q "^<-.*250"; then
+      # RCPT TO aceito = open relay confirmado
+      R587="fail"
+      FAIL=1
+      TOTAL_VULNS=$((TOTAL_VULNS + 1))
+      R587_DETAIL="CRITICAL: Server accepts relay without authentication on port 587. RCPT TO external accepted with '250'."
+      R587_SEVERITY="critical"
+    elif echo "$RCPT_RESPONSE_587" | grep -qi "sender.verify.failed\|sender.rejected"; then
+      # Sender verification em vez de auth - RFC 6409 violation
+      R587="warn"
+      FAIL=1
+      R587_DETAIL="RFC 6409 VIOLATION: Port 587 (submission) accepts MAIL FROM without AUTH. Rejects via sender verify instead of requiring authentication first. Vulnerable to backscatter and bounce attacks."
+      R587_SEVERITY="high"
+    elif echo "$RCPT_RESPONSE_587" | grep -qi "authentication.required\|auth.*required\|530"; then
+      # Correto para porta 587
+      R587="ok"
+      R587_DETAIL="Server correctly requires authentication on submission port (RFC 6409 compliant)"
+      R587_SEVERITY="ok"
+    elif echo "$RCPT_RESPONSE_587" | grep -qi "relay.not.permitted\|relaying.denied"; then
+      # Ok mas deveria pedir auth primeiro em 587
+      if [ "$MAIL_FROM_ACCEPTED" = "1" ]; then
+        R587="warn"
+        R587_DETAIL="WEAK: Server accepted MAIL FROM without AUTH on port 587, then rejected relay. Should require AUTH before MAIL FROM per RFC 6409."
+        R587_SEVERITY="medium"
+      else
+        R587="ok"
+        R587_DETAIL="Server rejected relay attempt"
+        R587_SEVERITY="ok"
+      fi
+    elif echo "$RCPT_RESPONSE_587" | grep -qi "^<-.*5[0-9][0-9]"; then
+      R587="ok"
+      R587_DETAIL="Server rejected relay attempt ($(echo "$RCPT_RESPONSE_587" | sed 's/^<- //'))"
+      R587_SEVERITY="ok"
+    else
+      R587="unknown"
+      R587_DETAIL="Could not determine relay status. Check logs manually."
+      R587_SEVERITY="medium"
+    fi
   fi
 
   # Extrai detalhes do swaks para relatório
@@ -427,6 +515,18 @@ for M in $MX; do
 
   # Extrai comandos SMTP disponíveis
   SMTP_COMMANDS=$(grep -A10 "smtp-commands:" "$OUTDIR/nmap-$IP.txt" 2>/dev/null | head -5)
+  
+  # Extrai LIMITS se disponível (RCPTMAX, MAILMAX)
+  SMTP_LIMITS=""
+  LIMITS_WARN=""
+  if grep -q "LIMITS" "$OUTDIR/nmap-$IP.txt" 2>/dev/null; then
+    SMTP_LIMITS=$(grep "LIMITS" "$OUTDIR/nmap-$IP.txt" 2>/dev/null)
+    # Verifica se RCPTMAX é absurdamente alto
+    RCPTMAX=$(echo "$SMTP_LIMITS" | grep -oP 'RCPTMAX=\K[0-9]+' 2>/dev/null)
+    if [ -n "$RCPTMAX" ] && [ "$RCPTMAX" -gt 1000 ]; then
+      LIMITS_WARN="RCPTMAX=$RCPTMAX is excessively high. Allows mass spam even from authenticated users."
+    fi
+  fi
 
   # Verifica se há usuários enumerados
   ENUM_USERS=""
@@ -434,15 +534,27 @@ for M in $MX; do
     ENUM_USERS=$(grep -A10 "smtp-enum-users:" "$OUTDIR/nmap-$IP.txt" 2>/dev/null)
   fi
 
-  # Conta vulnerabilidades deste servidor
+  # Conta vulnerabilidades e warnings deste servidor
   SERVER_VULNS=0
+  SERVER_WARNS=0
+  
+  # Conta critical como vuln
   [ "$R25" = "fail" ] && SERVER_VULNS=$((SERVER_VULNS + 1))
   [ "$R587" = "fail" ] && SERVER_VULNS=$((SERVER_VULNS + 1))
   [ "$NMAP_RELAY" = "fail" ] && SERVER_VULNS=$((SERVER_VULNS + 1))
   [ -n "$NMAP_VULNS" ] && SERVER_VULNS=$((SERVER_VULNS + 1))
+  
+  # Conta warnings (high/medium severity)
+  [ "$R25" = "warn" ] && SERVER_WARNS=$((SERVER_WARNS + 1))
+  [ "$R587" = "warn" ] && SERVER_WARNS=$((SERVER_WARNS + 1))
+  [ -n "$LIMITS_WARN" ] && SERVER_WARNS=$((SERVER_WARNS + 1))
 
   if [ $SERVER_VULNS -gt 0 ]; then
     SERVERS_FAIL=$((SERVERS_FAIL + 1))
+    TOTAL_VULNS=$((TOTAL_VULNS + SERVER_VULNS))
+  elif [ $SERVER_WARNS -gt 0 ]; then
+    SERVERS_WARN=$((SERVERS_WARN + 1))
+    TOTAL_WARNS=$((TOTAL_WARNS + SERVER_WARNS))
   else
     SERVERS_OK=$((SERVERS_OK + 1))
   fi
@@ -454,18 +566,28 @@ for M in $MX; do
   if [ "$R25" = "ok" ]; then
     print_status ok "Relay port 25: ${GREEN}Protected${NC}"
   elif [ "$R25" = "fail" ]; then
-    print_status fail "Relay port 25: ${RED}VULNERABLE (Open Relay)${NC}"
+    print_status fail "Relay port 25: ${RED}OPEN RELAY CONFIRMED${NC}"
+  elif [ "$R25" = "warn" ]; then
+    print_status warn "Relay port 25: ${YELLOW}WEAK CONFIG${NC}"
+  elif [ "$R25" = "unknown" ]; then
+    print_status warn "Relay port 25: ${YELLOW}UNKNOWN - check manually${NC}"
   else
     print_status unreachable "Relay port 25"
   fi
+  [ -n "$R25_DETAIL" ] && echo -e "      ${DIM}$R25_DETAIL${NC}"
 
   if [ "$R587" = "ok" ]; then
     print_status ok "Relay port 587: ${GREEN}Protected${NC}"
   elif [ "$R587" = "fail" ]; then
-    print_status fail "Relay port 587: ${RED}VULNERABLE (Open Relay)${NC}"
+    print_status fail "Relay port 587: ${RED}OPEN RELAY CONFIRMED${NC}"
+  elif [ "$R587" = "warn" ]; then
+    print_status warn "Relay port 587: ${YELLOW}RFC 6409 VIOLATION${NC}"
+  elif [ "$R587" = "unknown" ]; then
+    print_status warn "Relay port 587: ${YELLOW}UNKNOWN - check manually${NC}"
   else
     print_status unreachable "Relay port 587"
   fi
+  [ -n "$R587_DETAIL" ] && echo -e "      ${DIM}$R587_DETAIL${NC}"
 
   if [ "$STARTTLS" = "ok" ]; then
     print_status ok "STARTTLS: ${GREEN}Enabled${NC}"
@@ -475,6 +597,12 @@ for M in $MX; do
 
   if [ "$NMAP_RELAY" = "fail" ]; then
     print_status fail "Nmap Open Relay: ${RED}DETECTED${NC}"
+  else
+    print_status ok "Nmap Open Relay: Not detected"
+  fi
+  
+  if [ -n "$LIMITS_WARN" ]; then
+    print_status warn "$LIMITS_WARN"
   fi
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -482,30 +610,59 @@ for M in $MX; do
   # ════════════════════════════════════════════════════════════════════════════
   echo "## $M ($IP)" >> "$OUTDIR/report.md"
   echo "" >> "$OUTDIR/report.md"
-  echo "### Resultados dos Testes" >> "$OUTDIR/report.md"
+  echo "### Test Results" >> "$OUTDIR/report.md"
   echo "" >> "$OUTDIR/report.md"
-  echo "| Teste | Status | Detalhes |" >> "$OUTDIR/report.md"
-  echo "|-------|--------|----------|" >> "$OUTDIR/report.md"
-  echo "| Relay Porta 25 | $R25 | $R25_DETAIL |" >> "$OUTDIR/report.md"
-  echo "| Relay Porta 587 | $R587 | $R587_DETAIL |" >> "$OUTDIR/report.md"
-  echo "| STARTTLS | $STARTTLS | $([ "$STARTTLS" = "ok" ] && echo "TLS habilitado" || echo "TLS não detectado - comunicação pode estar em texto plano") |" >> "$OUTDIR/report.md"
-  echo "| Nmap Open Relay | $NMAP_RELAY | $([ "$NMAP_RELAY" = "fail" ] && echo "Nmap detectou servidor como open relay" || echo "Nmap não detectou open relay") |" >> "$OUTDIR/report.md"
+  echo "| Test | Status | Severity | Details |" >> "$OUTDIR/report.md"
+  echo "|------|--------|----------|---------|" >> "$OUTDIR/report.md"
+  echo "| Relay Port 25 | $R25 | $R25_SEVERITY | $R25_DETAIL |" >> "$OUTDIR/report.md"
+  echo "| Relay Port 587 | $R587 | $R587_SEVERITY | $R587_DETAIL |" >> "$OUTDIR/report.md"
+  echo "| STARTTLS | $STARTTLS | $([ "$STARTTLS" = "ok" ] && echo "ok" || echo "medium") | $([ "$STARTTLS" = "ok" ] && echo "TLS enabled" || echo "TLS not detected - communication may be plaintext") |" >> "$OUTDIR/report.md"
+  echo "| Nmap Open Relay | $NMAP_RELAY | $([ "$NMAP_RELAY" = "fail" ] && echo "critical" || echo "ok") | $([ "$NMAP_RELAY" = "fail" ] && echo "Nmap detected open relay" || echo "Nmap did not detect open relay") |" >> "$OUTDIR/report.md"
+  [ -n "$LIMITS_WARN" ] && echo "| SMTP Limits | warn | high | $LIMITS_WARN |" >> "$OUTDIR/report.md"
   echo "" >> "$OUTDIR/report.md"
 
-  if [ "$R25" = "fail" ] || [ "$R587" = "fail" ] || [ "$NMAP_RELAY" = "fail" ] || [ -n "$NMAP_VULNS" ]; then
-    echo "### ⚠️ Vulnerabilidades Detectadas" >> "$OUTDIR/report.md"
+  if [ $SERVER_VULNS -gt 0 ]; then
+    echo "### [CRITICAL] Confirmed Vulnerabilities" >> "$OUTDIR/report.md"
     echo "" >> "$OUTDIR/report.md"
-    [ "$R25" = "fail" ] && echo "- **Open Relay Porta 25**: $R25_DETAIL" >> "$OUTDIR/report.md"
-    [ "$R587" = "fail" ] && echo "- **Open Relay Porta 587**: $R587_DETAIL" >> "$OUTDIR/report.md"
-    [ "$NMAP_RELAY" = "fail" ] && echo "- **Nmap Open Relay**: Script nmap detectou servidor como open relay" >> "$OUTDIR/report.md"
-    [ -n "$NMAP_VULNS" ] && echo -e "- **Vulnerabilidades Nmap**:\n\`\`\`\n$NMAP_VULNS\n\`\`\`" >> "$OUTDIR/report.md"
+    [ "$R25" = "fail" ] && echo "- **Open Relay Port 25**: $R25_DETAIL" >> "$OUTDIR/report.md"
+    [ "$R587" = "fail" ] && echo "- **Open Relay Port 587**: $R587_DETAIL" >> "$OUTDIR/report.md"
+    [ "$NMAP_RELAY" = "fail" ] && echo "- **Nmap Open Relay**: Script confirmed open relay" >> "$OUTDIR/report.md"
+    [ -n "$NMAP_VULNS" ] && echo -e "- **CVE Vulnerabilities**:\n\`\`\`\n$NMAP_VULNS\n\`\`\`" >> "$OUTDIR/report.md"
     echo "" >> "$OUTDIR/report.md"
-    echo "### Recomendações" >> "$OUTDIR/report.md"
+  fi
+
+  if [ $SERVER_WARNS -gt 0 ]; then
+    echo "### [WARNING] Misconfigurations Detected" >> "$OUTDIR/report.md"
     echo "" >> "$OUTDIR/report.md"
-    echo "1. Configure autenticação SMTP obrigatória para relay" >> "$OUTDIR/report.md"
-    echo "2. Restrinja relay apenas para IPs/redes autorizadas" >> "$OUTDIR/report.md"
-    echo "3. Implemente SPF, DKIM e DMARC" >> "$OUTDIR/report.md"
-    echo "4. Monitore logs de envio de e-mail para atividades suspeitas" >> "$OUTDIR/report.md"
+    [ "$R25" = "warn" ] && echo "- **Port 25 Weak Config**: $R25_DETAIL" >> "$OUTDIR/report.md"
+    [ "$R587" = "warn" ] && echo "- **Port 587 RFC 6409 Violation**: $R587_DETAIL" >> "$OUTDIR/report.md"
+    [ -n "$LIMITS_WARN" ] && echo "- **Excessive Limits**: $LIMITS_WARN" >> "$OUTDIR/report.md"
+    echo "" >> "$OUTDIR/report.md"
+    echo "**Why this matters:**" >> "$OUTDIR/report.md"
+    echo "- Not an exploitable open relay *today*, but configuration is fragile" >> "$OUTDIR/report.md"
+    echo "- Sender verification instead of relay policy enables backscatter attacks" >> "$OUTDIR/report.md"
+    echo "- Port 587 should require AUTH before accepting MAIL FROM (RFC 6409)" >> "$OUTDIR/report.md"
+    echo "- One misconfigured ACL rule away from becoming open relay" >> "$OUTDIR/report.md"
+    echo "" >> "$OUTDIR/report.md"
+  fi
+
+  if [ $SERVER_VULNS -gt 0 ] || [ $SERVER_WARNS -gt 0 ]; then
+    echo "### Recommendations" >> "$OUTDIR/report.md"
+    echo "" >> "$OUTDIR/report.md"
+    if [ $SERVER_VULNS -gt 0 ]; then
+      echo "**IMMEDIATE ACTION REQUIRED:**" >> "$OUTDIR/report.md"
+      echo "1. Block relay immediately - server is being/can be abused" >> "$OUTDIR/report.md"
+      echo "2. Check mail queue for spam" >> "$OUTDIR/report.md"
+      echo "3. Verify you're not on blacklists (mxtoolbox.com)" >> "$OUTDIR/report.md"
+      echo "" >> "$OUTDIR/report.md"
+    fi
+    echo "**Configuration fixes:**" >> "$OUTDIR/report.md"
+    echo "1. Port 587: Require AUTH before MAIL FROM" >> "$OUTDIR/report.md"
+    echo "2. Replace sender verification with explicit relay deny policy" >> "$OUTDIR/report.md"
+    echo "3. Return '550 Relay not permitted' or '530 Auth required' not sender verify errors" >> "$OUTDIR/report.md"
+    echo "4. Reduce RCPTMAX to 50-100 maximum" >> "$OUTDIR/report.md"
+    echo "5. Implement SPF, DKIM and DMARC" >> "$OUTDIR/report.md"
+    echo "6. Separate submission ACL (587) from inbound ACL (25)" >> "$OUTDIR/report.md"
     echo "" >> "$OUTDIR/report.md"
   fi
 
@@ -536,7 +693,19 @@ for M in $MX; do
   # ════════════════════════════════════════════════════════════════════════════
   SERVER_STATUS_CLASS="safe"
   SERVER_STATUS_TEXT="OK"
-  [ $SERVER_VULNS -gt 0 ] && SERVER_STATUS_CLASS="critical" && SERVER_STATUS_TEXT="$SERVER_VULNS VULN"
+  if [ $SERVER_VULNS -gt 0 ]; then
+    SERVER_STATUS_CLASS="critical"
+    SERVER_STATUS_TEXT="$SERVER_VULNS CRITICAL"
+  elif [ $SERVER_WARNS -gt 0 ]; then
+    SERVER_STATUS_CLASS="warning"
+    SERVER_STATUS_TEXT="$SERVER_WARNS WARN"
+  fi
+
+  # Determina classe CSS para cada resultado
+  R25_CLASS="$R25"
+  [ "$R25" = "unknown" ] && R25_CLASS="warn"
+  R587_CLASS="$R587"
+  [ "$R587" = "unknown" ] && R587_CLASS="warn"
 
   cat >> "$OUTDIR/report.html" << SERVERHTML
     <div class="server-block">
@@ -548,13 +717,13 @@ for M in $MX; do
       <div class="server-body">
         <div class="test-row">
           <span class="test-label">Relay Port 25:</span>
-          <span class="test-value $R25">$([ "$R25" = "ok" ] && echo "[OK] Protected" || ([ "$R25" = "fail" ] && echo "[FAIL] VULNERABLE" || echo "[--] Unreachable"))</span>
+          <span class="test-value $R25_CLASS">$([ "$R25" = "ok" ] && echo "[OK] Protected" || ([ "$R25" = "fail" ] && echo "[CRITICAL] OPEN RELAY" || ([ "$R25" = "warn" ] && echo "[WARN] Weak Config" || ([ "$R25" = "unknown" ] && echo "[?] Unknown" || echo "[--] Unreachable"))))</span>
         </div>
         <div class="details">$R25_DETAIL</div>
         
         <div class="test-row">
           <span class="test-label">Relay Port 587:</span>
-          <span class="test-value $R587">$([ "$R587" = "ok" ] && echo "[OK] Protected" || ([ "$R587" = "fail" ] && echo "[FAIL] VULNERABLE" || echo "[--] Unreachable"))</span>
+          <span class="test-value $R587_CLASS">$([ "$R587" = "ok" ] && echo "[OK] Protected" || ([ "$R587" = "fail" ] && echo "[CRITICAL] OPEN RELAY" || ([ "$R587" = "warn" ] && echo "[WARN] RFC Violation" || ([ "$R587" = "unknown" ] && echo "[?] Unknown" || echo "[--] Unreachable"))))</span>
         </div>
         <div class="details">$R587_DETAIL</div>
         
@@ -565,36 +734,66 @@ for M in $MX; do
         
         <div class="test-row">
           <span class="test-label">Nmap Open Relay:</span>
-          <span class="test-value $NMAP_RELAY">$([ "$NMAP_RELAY" = "ok" ] && echo "[OK] Not detected" || echo "[FAIL] DETECTED")</span>
+          <span class="test-value $NMAP_RELAY">$([ "$NMAP_RELAY" = "ok" ] && echo "[OK] Not detected" || echo "[CRITICAL] DETECTED")</span>
         </div>
 SERVERHTML
+
+  [ -n "$LIMITS_WARN" ] && cat >> "$OUTDIR/report.html" << LIMITSHTML
+        <div class="test-row">
+          <span class="test-label">SMTP Limits:</span>
+          <span class="test-value warn">[WARN] $LIMITS_WARN</span>
+        </div>
+LIMITSHTML
 
   # Adiciona seção de vulnerabilidades se houver
   if [ $SERVER_VULNS -gt 0 ]; then
     cat >> "$OUTDIR/report.html" << VULNHTML
-        <div class="vuln-box">
-          <h4>:: VULNERABILITIES DETECTED ::</h4>
+        <div class="vuln-box critical">
+          <h4>:: CRITICAL - CONFIRMED VULNERABILITIES ::</h4>
           <ul>
 VULNHTML
     [ "$R25" = "fail" ] && echo "            <li>Open Relay Port 25: $R25_DETAIL</li>" >> "$OUTDIR/report.html"
     [ "$R587" = "fail" ] && echo "            <li>Open Relay Port 587: $R587_DETAIL</li>" >> "$OUTDIR/report.html"
-    [ "$NMAP_RELAY" = "fail" ] && echo "            <li>Nmap Open Relay: Script confirmed open relay</li>" >> "$OUTDIR/report.html"
+    [ "$NMAP_RELAY" = "fail" ] && echo "            <li>Nmap confirmed open relay</li>" >> "$OUTDIR/report.html"
     if [ -n "$NMAP_VULNS" ]; then
       echo "            <li>CVE Vulnerabilities:<pre>$(echo "$NMAP_VULNS" | sed 's/</\&lt;/g; s/>/\&gt;/g')</pre></li>" >> "$OUTDIR/report.html"
     fi
-    cat >> "$OUTDIR/report.html" << VULNHTML2
+    echo "          </ul>" >> "$OUTDIR/report.html"
+    echo "        </div>" >> "$OUTDIR/report.html"
+  fi
+
+  if [ $SERVER_WARNS -gt 0 ]; then
+    cat >> "$OUTDIR/report.html" << WARNHTML
+        <div class="vuln-box warning">
+          <h4>:: WARNING - MISCONFIGURATIONS ::</h4>
+          <ul>
+WARNHTML
+    [ "$R25" = "warn" ] && echo "            <li>Port 25: $R25_DETAIL</li>" >> "$OUTDIR/report.html"
+    [ "$R587" = "warn" ] && echo "            <li>Port 587: $R587_DETAIL</li>" >> "$OUTDIR/report.html"
+    [ -n "$LIMITS_WARN" ] && echo "            <li>$LIMITS_WARN</li>" >> "$OUTDIR/report.html"
+    cat >> "$OUTDIR/report.html" << WARNHTML2
           </ul>
-          <div class="recommendations">
-            <h4>:: RECOMMENDATIONS ::</h4>
-            <ul>
-              <li>Configure mandatory SMTP authentication for relay</li>
-              <li>Restrict relay to authorized IPs/networks only</li>
-              <li>Implement SPF, DKIM and DMARC</li>
-              <li>Monitor mail logs for suspicious activity</li>
-            </ul>
-          </div>
+          <p style="color:#888;margin-top:10px;font-size:0.85rem;">
+            Not exploitable open relay today, but fragile configuration.
+            One ACL mistake away from becoming vulnerable.
+          </p>
         </div>
-VULNHTML2
+WARNHTML2
+  fi
+
+  if [ $SERVER_VULNS -gt 0 ] || [ $SERVER_WARNS -gt 0 ]; then
+    cat >> "$OUTDIR/report.html" << RECHTML
+        <div class="recommendations">
+          <h4>:: RECOMMENDATIONS ::</h4>
+          <ul>
+            <li>Port 587: Require AUTH before MAIL FROM</li>
+            <li>Use explicit relay deny, not sender verification</li>
+            <li>Return '550 Relay not permitted' or '530 Auth required'</li>
+            <li>Reduce RCPTMAX to 50-100</li>
+            <li>Implement SPF, DKIM and DMARC</li>
+          </ul>
+        </div>
+RECHTML
   fi
 
   # Adiciona output do nmap
@@ -624,15 +823,18 @@ NMAPHTML
       "ip": "$IP",
       "relay25": {
         "status": "$R25",
+        "severity": "$R25_SEVERITY",
         "detail": "$R25_DETAIL"
       },
       "relay587": {
         "status": "$R587",
+        "severity": "$R587_SEVERITY",
         "detail": "$R587_DETAIL"
       },
       "starttls": "$STARTTLS",
       "nmap_relay": "$NMAP_RELAY",
-      "vulnerabilities_count": $SERVER_VULNS
+      "vulnerabilities_count": $SERVER_VULNS,
+      "warnings_count": $SERVER_WARNS
     }
 JSONSERVER
 
@@ -642,8 +844,10 @@ echo "  ]," >> "$OUTDIR/report.json"
 echo "  \"summary\": {" >> "$OUTDIR/report.json"
 echo "    \"total_servers\": $MX_COUNT," >> "$OUTDIR/report.json"
 echo "    \"servers_ok\": $SERVERS_OK," >> "$OUTDIR/report.json"
-echo "    \"servers_vulnerable\": $SERVERS_FAIL," >> "$OUTDIR/report.json"
-echo "    \"total_vulnerabilities\": $TOTAL_VULNS" >> "$OUTDIR/report.json"
+echo "    \"servers_warning\": $SERVERS_WARN," >> "$OUTDIR/report.json"
+echo "    \"servers_critical\": $SERVERS_FAIL," >> "$OUTDIR/report.json"
+echo "    \"total_vulnerabilities\": $TOTAL_VULNS," >> "$OUTDIR/report.json"
+echo "    \"total_warnings\": $TOTAL_WARNS" >> "$OUTDIR/report.json"
 echo "  }" >> "$OUTDIR/report.json"
 echo "}" >> "$OUTDIR/report.json"
 
@@ -662,12 +866,12 @@ SUMMARY_HTML=$(cat << SUMMARYEOF
         <span class="value ok">$SERVERS_OK</span>
       </div>
       <div class="summary-item">
-        <span class="label">Vulnerable:</span>
-        <span class="value $([ $SERVERS_FAIL -gt 0 ] && echo "fail" || echo "ok")">$SERVERS_FAIL</span>
+        <span class="label">Warnings:</span>
+        <span class="value $([ $SERVERS_WARN -gt 0 ] && echo "warn" || echo "ok")">$SERVERS_WARN</span>
       </div>
       <div class="summary-item">
-        <span class="label">Total Vulns:</span>
-        <span class="value $([ $TOTAL_VULNS -gt 0 ] && echo "fail" || echo "ok")">$TOTAL_VULNS</span>
+        <span class="label">Critical:</span>
+        <span class="value $([ $SERVERS_FAIL -gt 0 ] && echo "fail" || echo "ok")">$SERVERS_FAIL</span>
       </div>
     </div>
 SUMMARYEOF
@@ -706,24 +910,38 @@ echo ""
 echo -e "  ${GRAY}Statistics:${NC}"
 print_status info "Servers analyzed: $MX_COUNT"
 print_status ok "Secure servers: $SERVERS_OK"
-[ $SERVERS_FAIL -gt 0 ] && print_status fail "Vulnerable servers: $SERVERS_FAIL"
-[ $TOTAL_VULNS -gt 0 ] && print_status fail "Total vulnerabilities: $TOTAL_VULNS"
+[ $SERVERS_WARN -gt 0 ] && print_status warn "Servers with warnings: $SERVERS_WARN"
+[ $SERVERS_FAIL -gt 0 ] && print_status fail "Critical vulnerabilities: $SERVERS_FAIL"
+[ $TOTAL_VULNS -gt 0 ] && print_status fail "Total confirmed vulns: $TOTAL_VULNS"
+[ $TOTAL_WARNS -gt 0 ] && print_status warn "Total misconfigurations: $TOTAL_WARNS"
 echo ""
 
 if [ $FAIL -eq 1 ]; then
   echo -e "  ${RED}┌────────────────────────────────────────────────────────────────┐${NC}"
-  echo -e "  ${RED}│  [!] VULNERABILITIES DETECTED                                  │${NC}"
+  echo -e "  ${RED}│  [!] CRITICAL VULNERABILITIES DETECTED                         │${NC}"
   echo -e "  ${RED}└────────────────────────────────────────────────────────────────┘${NC}"
   echo ""
-  print_status fail "Check reports for details"
+  print_status fail "Confirmed open relay - immediate action required"
   echo ""
   echo -e "  ${YELLOW}Open HTML report:${NC}"
   echo -e "  ${CYAN}xdg-open $OUTDIR/report.html${NC}"
   echo ""
   exit 2
+elif [ $SERVERS_WARN -gt 0 ]; then
+  echo -e "  ${YELLOW}┌────────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "  ${YELLOW}│  [!] MISCONFIGURATIONS DETECTED                                │${NC}"
+  echo -e "  ${YELLOW}└────────────────────────────────────────────────────────────────┘${NC}"
+  echo ""
+  print_status warn "Not open relay, but weak/fragile configuration"
+  print_status warn "Review recommendations in report"
+  echo ""
+  echo -e "  ${GRAY}Open HTML report:${NC}"
+  echo -e "  ${CYAN}xdg-open $OUTDIR/report.html${NC}"
+  echo ""
+  exit 1
 else
   echo -e "  ${GREEN}┌────────────────────────────────────────────────────────────────┐${NC}"
-  echo -e "  ${GREEN}│  [OK] NO CRITICAL VULNERABILITIES DETECTED                    │${NC}"
+  echo -e "  ${GREEN}│  [OK] NO VULNERABILITIES DETECTED                              │${NC}"
   echo -e "  ${GREEN}└────────────────────────────────────────────────────────────────┘${NC}"
   echo ""
   print_status ok "Audit completed successfully"
